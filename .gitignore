@@ -1,0 +1,10 @@
+# artefacts locaux
+*.bak
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# sorties de téléchargement ani-cli
+*.mp4
+*.mkv
