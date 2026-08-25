@@ -32,9 +32,11 @@ Fork enrichi de [ani-cli](https://github.com/pystardust/ani-cli) : recherchez, r
 |---|---|:--:|:--:|---|
 | **anime-sama** (`--site anime-sama`) | large catalogue FR | ✅ | ✅ | — |
 | **franime** (`--site franime`) | catalogue FR sans pub | ✅ | ✅ | — |
+| **aniworld** (`--site aniworld`) | catalogue DE 🇩🇪 | ✅ GerDub | ✅ GerSub/OmU | eng… |
 | **anidb** (défaut) | catalogue international | parfois | — | jpn, eng… |
 
 - 🇫🇷 Sur anime-sama et franime : **VF par défaut**, repli **automatique en VOSTFR** épisode par épisode
+- 🇩🇪 Sur aniworld : **GerDub par défaut**, repli automatique **GerSub** puis OmU/EngSub
 - 🌐 Domaine actif d'anime-sama **résolu automatiquement** via la liste officielle de `anime-sama.pw` (si un domaine tombe, le suivant est essayé : `.si → .tv → .to → .org → .fr → .eu`)
 - 🔁 Essai automatique de plusieurs **lecteurs** par épisode (sibnet, vidmoly, sendvid…) jusqu'à trouver un flux exploitable
 - 🎚️ Qualité au choix, menus `fzf`/`rofi`/`dmenu`, historique de reprise multi-sources, téléchargement, Syncplay
@@ -129,6 +131,7 @@ Le plus simple — une commande dédiée :
 
 ```sh
 ani-cli --set-site franime        # enregistre durablement
+ani-cli --set-site aniworld       # source allemande : GerDub auto
 ani-cli --set-site                # affiche le site par défaut actuel
 ```
 
@@ -191,6 +194,11 @@ man ani-cli                           # aide complète
 - Choix de la saison puis des épisodes ; flux résolus par lecteur déclaré (sibnet privilégié, puis vidmoly, sendvid…), après décryptage du lien `watch2`.
 - Nécessite `python3` **ou** `jq`.
 
+### aniworld (`--site aniworld`)
+- Catalogue allemand ; recherche via l'endpoint interne du site.
+- **GerDub par défaut** ; repli automatique GerSub, puis OmU/EngSub, épisode par épisode.
+- Lecteurs essayés dans l'ordre (vidmoly, doodstream, voe…) après résolution du lien `/redirect/`.
+
 ### anidb (défaut)
 - Sub = japonais ; `--dub` cherche la première langue disponible de `--dub-lang` (défaut `fre eng` : français puis anglais) avec message explicite.
 - Sélecteur de qualité natif du site (best/worst/1080/720/…), compte à rebours `-N` via animeschedule.net.
@@ -244,7 +252,7 @@ Raccourcis fzf utiles : `Tab` multi-sélection, `Entrée` valider, flèches/Ctrl
 
 | Variable | Rôle | Défaut |
 |---|---|---|
-| `ANI_CLI_SITE` | Source par défaut (`anidb`, `anime-sama`, `franime`) | `anidb` |
+| `ANI_CLI_SITE` | Source par défaut (`anidb`, `anime-sama`, `franime`, `aniworld`) | `anidb` |
 | `ANI_CLI_MODE` | Mode de départ (`sub`, `dub`). `sub` force la VOSTFR stricte sur sama/franime | `sub` |
 | `ANI_CLI_DUB_LANG` | Langues de dub prioritaires (anidb) | `fre eng` |
 | `ANI_CLI_QUALITY` | Qualité | `best` |
@@ -332,7 +340,7 @@ Priorité : **défauts intégrés < config < variables d'environnement < options
 - **Puis-je choisir la langue de dub sur anidb ?** Oui : `--dub-lang fre,eng,jpn` (ou noms : `french,japanese`), avec repli par épisode.
 - **Comment changer la langue en cours de lecture ?** Menu → `change_language`.
 - **Ça marche hors du dossier du projet ?** Oui, une fois installé : `ani-cli` partout. Après toute modification du code source, relancez `./install/modif-update.sh`.
-- **Je peux changer la source de streaming ?** Non (sauf scraper vous-même), mais vous avez le choix entre trois sites.
+- **Je peux changer la source de streaming ?** Non (sauf scraper vous-même), mais vous avez le choix entre quatre sites (anidb, anime-sama, franime, aniworld).
 
 ---
 

@@ -58,8 +58,8 @@ Play the dubbed version (French preferred by default, English fallback). Without
 \fB\-L | \--dub-lang\fR \fI\,<langs>\/\fR
 Preferred dub languages, comma separated, tried in order for each episode. Codes or names are accepted (e.g. fre,eng,jpn or french). Implies --dub. Default is fre,eng (see ANI_CLI_DUB_LANG). Only applies to the anidb source.
 .TP
-\fB\--site\fR \fI\,<anidb|anime-sama|franime>\/\fR
-Select the source site. anidb (default) serves sub/dub with many dub languages when available. anime-sama (domain auto-detected through anime-sama.pw) and franime serve VF and VOSTFR: playback defaults to VF and automatically falls back to VOSTFR per episode when no VF is available. Force VOSTFR with ANI_CLI_MODE=sub. The change_language playback menu switches language on the fly.
+\fB\--site\fR \fI\,<anidb|anime-sama|franime|aniworld>\/\fR
+Select the source site. anidb (default) serves sub/dub with many dub languages when available. anime-sama (domain auto-detected through anime-sama.pw), franime and aniworld serve local-language content: playback defaults to the dub (VF on anime-sama/franime, GerDub on aniworld) and automatically falls back to the subbed variant per episode when no dub is available. Force subbed with ANI_CLI_MODE=sub. The change_language playback menu switches language on the fly.
 .TP
 \fB\--set-site\fR \fI\,<anidb|anime-sama|franime>\/\fR
 Permanently save the default source site in the configuration file (~/.config/ani-cli/ani-cli.conf). Without argument, displays the current default.

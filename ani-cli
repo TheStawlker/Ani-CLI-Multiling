@@ -80,10 +80,11 @@ help_info() {
         e.g. --dub-lang fre,eng,jpn or --dub-lang japanese
         Implies --dub. Default: fre,eng (env: ANI_CLI_DUB_LANG)
       --site <name>
-        Source site: anidb (sub/dub), anime-sama or franime (VF/VOSTFR).
-        On anime-sama/franime, playback defaults to French (VF) and falls
-        back to VOSTFR automatically per episode when no VF exists.
-        Force VOSTFR with ANI_CLI_MODE=sub.
+        Source site: anidb (sub/dub), anime-sama or franime (VF/VOSTFR),
+        aniworld (GerDub/GerSub). Local-dub-first sources play German or
+        French by default and fall back automatically to the subbed
+        variant per episode when no dub exists.
+        Force subbed with ANI_CLI_MODE=sub.
         Default: anidb (env: ANI_CLI_SITE)
       --set-site <name>
         Save the default site permanently in the configuration file
@@ -507,6 +508,74 @@ extract_video_url() {
     esac
 }
 
+# ------------------------------ aniworld -------------------------------
+
+# search aniworld. prints (aniworld:slug \t name)
+aw_search() {
+    plain_curl -X POST -d "keyword=$1" "https://aniworld.to/ajax/search" |
+        sed 's|{"title"|\n\{"title"|g; s|\\/|/|g' |
+        sed -nE 's|^.*"title":"([^"]*)", *"description".*"link":"(/anime/stream/[^"]+)".*|\2\t\1|p' |
+        sed -e 's|<em>||g' -e 's|</em>||g' \
+            -e 's|\\u00e4|ä|g' -e 's|\\u00f6|ö|g' -e 's|\\u00fc|ü|g' \
+            -e 's|\\u00df|ß|g' -e 's|\\u00e9|é|g' -e 's|\\u00e8|è|g' |
+        awk -F'\t' '{ if (match($1, /^\/anime\/stream\/[^/]+/)) { k = substr($1, RSTART, RLENGTH); sub(/^\/anime\/stream\//, "", k); if (!seen[k]++) print k "\t" $2 } }' |
+        sort -u | sed 's|^|aniworld:|'
+}
+
+# list seasons of a series. prints (staffel_path \t label)
+aw_seasons() {
+    plain_curl "https://aniworld.to/anime/stream/${1}" |
+        grep -oE '/anime/stream/'"${1}"'/staffel-[0-9]+' | sort -u |
+        sed -E 's|^/anime/stream/[^/]+/||' |
+        awk '{ n = $0; sub(/^staffel-/, "", n); print $0 "\tStaffel " n }'
+}
+
+# number of episodes of a season
+aw_eps_count() {
+    # $1 = slug, $2 = staffel path (staffel-N)
+    plain_curl "https://aniworld.to/anime/stream/${1}/${2}" |
+        grep -oE "/anime/stream/${1}/${2}/episode-[0-9]+" | sort -u | wc -l | tr -d "[:space:]"
+}
+
+# hoster links of an episode. prints rows: <lang_key>\t<link_id>\t<hoster>
+# lang keys: 1 = GerDub, 3 = GerSub, 2 = OmU/EngSub
+aw_episode_links() {
+    # $1 = slug, $2 = staffel, $3 = episode number
+    plain_curl "https://aniworld.to/anime/stream/${1}/${2}/episode-${3}" | awk '
+        BEGIN { RS = "<li " }
+        /data-link-id=/ {
+            lk = ""; id = ""; hn = ""
+            if (match($0, /data-lang-key="[0-9]+"/))
+                lk = substr($0, RSTART + 15, RLENGTH - 16)
+            if (match($0, /data-link-id="[0-9]+"/))
+                id = substr($0, RSTART + 14, RLENGTH - 15)
+            if (match($0, /icon [A-Za-z]+"/))
+                hn = substr($0, RSTART + 5, RLENGTH - 6)
+            if (id != "" && lk != "")
+                print lk "\t" id "\t" hn
+        }'
+}
+
+# resolve one /redirect/<id> then extract a direct stream
+aw_pick_url() {
+    # $1 = rows (lang\tid\thoster) already filtered for the wanted language,
+    # tries hosters in ascending order until extraction succeeds
+    printf "%s" "$1" | sort -t '	' -k 3 | while IFS='	' read -r _lk _id _hn; do
+        [ -n "$_id" ] || continue
+        _loc=$($curl_exe -s -o /dev/null -w "%{redirect_url}" --max-time 20 -A "$agent" -H "Referer: https://aniworld.to/" "https://aniworld.to/redirect/${_id}")
+        [ -z "$_loc" ] && continue
+        case "$_loc" in
+            //*) _loc="https:$_loc" ;;
+        esac
+        extract_referer="https://aniworld.to/"
+        _stream=$(extract_video_url "$_loc")
+        if [ -n "$_stream" ]; then
+            printf "%s" "$_stream"
+            exit 0
+        fi
+    done
+}
+
 # --------------------- per-site episode preparation ---------------------
 
 # build ep_list/episode_maps from a max count
@@ -589,6 +658,30 @@ franime_prepare() {
     fi
     anime_id="franime:${anime_id##*:}@${current_saison}"
     franime_load_episodes
+}
+
+# load episode list of the current aniworld season
+aw_load_episodes() {
+    _slug="$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')"
+    site_seq_episodes "$(aw_eps_count "$_slug" "$season_path")"
+}
+
+# search flow: choose season then load episodes
+aw_prepare() {
+    _slug="${anime_id#aniworld:}"
+    seasons="$(aw_seasons "$_slug")"
+    [ -z "$seasons" ] && die "No seasons found!"
+    if [ -z "$season_path" ]; then
+        _count=$(printf "%s" "$seasons" | wc -l | tr -d "[:space:]")
+        if [ "$_count" -gt 1 ] && [ -z "${index:-}" ]; then
+            season_path=$(printf "%s" "$seasons" | nl -w 2 | sed 's/^[[:space:]]//' | nth "Select season: " | cut -f 1)
+        else
+            season_path=$(printf "%s" "$seasons" | head -n 1 | cut -f 1)
+        fi
+        [ -z "$season_path" ] && die "Invalid season selection"
+    fi
+    anime_id="aniworld:${_slug}@${season_path}"
+    aw_load_episodes
 }
 
 # select the quality according to the setting
@@ -721,8 +814,55 @@ get_video_link() {
     case "$site" in
         sama) get_video_link_sama ;;
         franime) get_video_link_franime ;;
+        aniworld) get_video_link_aniworld ;;
         *) get_video_link_anidb ;;
     esac
+}
+
+# aniworld: mode dub = GerDub (lang 1), sub = GerSub (lang 3).
+# German-first sources fall back automatically to GerSub when no GerDub exists
+get_video_link_aniworld() {
+    _slug="$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')"
+    case "$anime_id" in
+        *@*) _staffel="${anime_id##*@}" ;;
+        *) _staffel="${season_path:-${_staffel:-}}" ;;
+    esac
+    _ep="${ep_no%%.*}"
+
+    _rows="$(aw_episode_links "$_slug" "$_staffel" "$_ep")"
+    [ -z "$_rows" ] && die "Episode not released!"
+
+    # sélection interactive explicite (change_language) : clé directe, sans repli
+    _explicit=""
+    case "${forced_lang:-}" in
+        1 | 2 | 3) _explicit="$forced_lang" ;;
+    esac
+
+    if [ -n "$_explicit" ]; then
+        _lang="$_explicit"
+    else
+        _lang=1
+        [ "$mode" != "dub" ] && _lang=3
+    fi
+
+    _sel="$(printf "%s" "$_rows" | awk -F'\t' -v l="$_lang" '$1 == l')"
+    if [ -z "$_sel" ] && [ "$_lang" = "1" ] && [ -z "$_explicit" ]; then
+        printf "\33[2K\r\033[1;33mGerDub not available for this episode, falling back to GerSub\033[0m\n" >&2
+        _lang=3
+        _sel="$(printf "%s" "$_rows" | awk -F'\t' -v l="$_lang" '$1 == l')"
+    fi
+    if [ -z "$_sel" ] && [ "$_lang" = "3" ] && printf "%s" "$_rows" | grep -q "^2	"; then
+        if [ "$mode" != "dub" ]; then
+            printf "\33[2K\r\033[1;33mGerSub not available, falling back to OmU/EngSub\033[0m\n" >&2
+            _sel="$(printf "%s" "$_rows" | awk -F'\t' '$1 == "2"')"
+            _lang=2
+        fi
+    fi
+    [ -z "$_sel" ] && die "No sources found!"
+    info "aniworld.to links fetched"
+
+    video_link=$(aw_pick_url "$_sel")
+    [ -z "$video_link" ] && die "Could not extract any playable stream!"
 }
 
 # provide countdown for the next episode release both sub and dub
@@ -800,6 +940,11 @@ process_hist_entry() {
             anime_id="franime:$(printf '%s' "$anime_id" | sed 's|^franime:||; s|@[^@]*$||')"
             details_file="$(franime_details "${anime_id##*:}")" || exit 1
             ep_list=$(awk -v n="$(franime_eps_count "$details_file" "$current_saison")" 'BEGIN { for (i = 1; i <= n; i++) print i }')
+            ;;
+        aniworld:*)
+            season_path="${anime_id##*@}"
+            anime_id="aniworld:$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')"
+            ep_list=$(awk -v n="$(aw_eps_count "${anime_id#aniworld:}" "$season_path")" 'BEGIN { for (i = 1; i <= n; i++) print i }')
             ;;
         *)
             ep_list=$(anidb_episodes "$anime_id" | cut -f 2)
@@ -935,8 +1080,9 @@ site="${ANI_CLI_SITE:-${site:-anidb}}"
 case "$site" in
     anime-sama | sama) site=sama ;;
     franime | fr) site=franime ;;
+    aniworld | aw) site=aniworld ;;
     anidb | "") site=anidb ;;
-    *) die "Unknown source site '$site' (valid: anidb, anime-sama, franime)" ;;
+    *) die "Unknown source site '$site' (valid: anidb, anime-sama, franime, aniworld)" ;;
 esac
 sama_domain=""
 json_bin=""
@@ -1050,8 +1196,8 @@ while [ $# -gt 0 ]; do
         --site)
             [ $# -lt 2 ] && die "missing argument!"
             case "$2" in
-                anidb | sama | anime-sama | franime | fr) site="$(printf "%s" "$2" | sed 's|^anime-sama$|sama|; s|^fr$|franime|')" ;;
-                *) die "Unknown source: $2 (valid: anidb, anime-sama, franime)" ;;
+                anidb | sama | anime-sama | franime | fr | aniworld | aw) site="$(printf "%s" "$2" | sed 's|^anime-sama$|sama|; s|^fr$|franime|; s|^aw$|aniworld|')" ;;
+                *) die "Unknown source: $2 (valid: anidb, anime-sama, franime, aniworld)" ;;
             esac
             shift
             ;;
@@ -1060,15 +1206,16 @@ while [ $# -gt 0 ]; do
             if [ $# -lt 2 ]; then
                 _cur="${ANI_CLI_SITE:-$(sed -n 's/^site=//p' "$_conf" 2>/dev/null | head -n 1)}"
                 info "Site par défaut actuel : ${_cur:-anidb} ($_conf)"
-                info "Usage: ani-cli --set-site <anidb|anime-sama|franime>"
+                info "Usage: ani-cli --set-site <anidb|anime-sama|franime|aniworld>"
                 exit 0
             fi
             _ns="$(printf "%s" "$2" | tr '[:upper:]' '[:lower:]')"
             case "$_ns" in
                 anime-sama | sama) _ns=sama ;;
                 franime | fr) _ns=franime ;;
+                aniworld | aw) _ns=aniworld ;;
                 anidb) _ns=anidb ;;
-                *) die "Unknown source: $2 (valid: anidb, anime-sama, franime)" ;;
+                *) die "Unknown source: $2 (valid: anidb, anime-sama, franime, aniworld)" ;;
             esac
             mkdir -p "$(dirname "$_conf")"
             if [ -f "$_conf" ] && grep -q "^site=" "$_conf"; then
@@ -1144,6 +1291,13 @@ case "$source" in
                 anime_id="sama:$(printf '%s' "$anime_id" | sed 's|^sama:||; s|@[^@]*$||')"
                 sama_load_episodes
                 ;;
+            aniworld:*)
+                site=aniworld
+                season_path="${anime_id##*@}"
+                anime_id="aniworld:$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')"
+                seasons="$(aw_seasons "${anime_id#aniworld:}")"
+                aw_load_episodes
+                ;;
             franime:*)
                 site=franime
                 current_saison="${anime_id##*@}"
@@ -1178,6 +1332,7 @@ case "$source" in
         case "$site" in
             sama) anime_list=$(sama_search "$query") ;;
             franime) anime_list=$(franime_search "$query") ;;
+            aniworld) anime_list=$(aw_search "$query") ;;
             *)
                 query=$(printf "%s" "$query" | sed 's| |+|g')
                 anime_list=$(anidb_search "$query")
@@ -1192,6 +1347,7 @@ case "$source" in
         case "$site" in
             sama) sama_prepare ;;
             franime) franime_prepare ;;
+            aniworld) aw_prepare ;;
             *)
                 anidb_desc "$anime_id" || true
                 episode_maps="$(anidb_episodes "$anime_id")"
@@ -1203,10 +1359,11 @@ case "$source" in
         ;;
 esac
 
-# French-first sources: playback defaults to VF and automatically falls back
-# to VOSTFR per episode when no VF is available. Explicit VOSTFR can still be
-# requested with ANI_CLI_MODE=sub.
-if [ "$site" = "sama" ] || [ "$site" = "franime" ]; then
+# German/French-first sources: playback defaults to the local dub
+# (GerDub on aniworld, VF on sama/franime) and falls back automatically to
+# the subbed variant per episode when no dub exists. Explicit subbed audio
+# can still be requested with ANI_CLI_MODE=sub.
+if [ "$site" = "sama" ] || [ "$site" = "franime" ] || [ "$site" = "aniworld" ]; then
     [ -z "${ANI_CLI_MODE:-}" ] && mode="dub"
 fi
 
@@ -1238,6 +1395,25 @@ while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nchange_langua
                     [ -z "$new_lang" ] && die "Invalid language selection"
                     [ "$new_lang" = "VF" ] && mode="dub" || mode="sub"
                     ;;
+                aniworld)
+                    _slug="$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')"
+                    _st="$(printf '%s' "$anime_id" | sed 's|^aniworld:.*@||')"
+                    _rows_aw="$(aw_episode_links "$_slug" "$_st" "${ep_no%%.*}")"
+                    _langs=""
+                    printf "%s" "$_rows_aw" | grep -q "^1	" && _langs="GerDub"
+                    printf "%s" "$_rows_aw" | grep -q "^3	" && _langs="${_langs:+$_langs
+}GerSub"
+                    printf "%s" "$_rows_aw" | grep -q "^2	" && _langs="${_langs:+$_langs
+}OmU/EngSub"
+                    [ -z "$_langs" ] && die "No languages available for this episode"
+                    new_lang="$(printf "%s" "$_langs" | nl -w 2 | sed 's/^[[:space:]]//' | nth "Select language: " | cut -f 2)"
+                    [ -z "$new_lang" ] && die "Invalid language selection"
+                    case "$new_lang" in
+                        GerDub) mode="dub"; forced_lang="1" ;;
+                        GerSub) mode="sub"; forced_lang="3" ;;
+                        *) mode="sub"; forced_lang="2" ;;
+                    esac
+                    ;;
                 franime)
                     fa_require_deps
                     _ep_index=""
@@ -1267,6 +1443,13 @@ while cmd=$(printf "next\nreplay\nprevious\nselect$seasons_option\nchange_langua
             ;;
         change_season)
             case "$site" in
+                aniworld)
+                    new_anime="$(printf "%s" "$seasons" | nl -w 2 | sed 's/^[[:space:]]//' | nth "Select season: ")"
+                    [ -z "$new_anime" ] && die "Invalid season selection"
+                    season_path="$(printf "%s" "$new_anime" | cut -f 1)"
+                    anime_id="aniworld:$(printf '%s' "$anime_id" | sed 's|^aniworld:||; s|@[^@]*$||')@$season_path"
+                    aw_load_episodes
+                    ;;
                 sama)
                     new_anime="$(printf "%s" "$seasons" | nl -w 2 | sed 's/^[[:space:]]//' | nth "Select season: ")"
                     [ -z "$new_anime" ] && die "Invalid season selection"
