@@ -85,6 +85,10 @@ help_info() {
         back to VOSTFR automatically per episode when no VF exists.
         Force VOSTFR with ANI_CLI_MODE=sub.
         Default: anidb (env: ANI_CLI_SITE)
+      --set-site <name>
+        Save the default site permanently in the configuration file
+        (~/.config/ani-cli/ani-cli.conf). Without argument, shows the
+        current default.
     Configuration:
       Options persistantes dans ~/.config/ani-cli/ani-cli.conf
       (ex: site=franime). Priorité: défauts < config < env < options CLI.
@@ -1050,6 +1054,36 @@ while [ $# -gt 0 ]; do
                 *) die "Unknown source: $2 (valid: anidb, anime-sama, franime)" ;;
             esac
             shift
+            ;;
+        --set-site)
+            _conf="${ANI_CLI_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/ani-cli/ani-cli.conf}"
+            if [ $# -lt 2 ]; then
+                _cur="${ANI_CLI_SITE:-$(sed -n 's/^site=//p' "$_conf" 2>/dev/null | head -n 1)}"
+                info "Site par défaut actuel : ${_cur:-anidb} ($_conf)"
+                info "Usage: ani-cli --set-site <anidb|anime-sama|franime>"
+                exit 0
+            fi
+            _ns="$(printf "%s" "$2" | tr '[:upper:]' '[:lower:]')"
+            case "$_ns" in
+                anime-sama | sama) _ns=sama ;;
+                franime | fr) _ns=franime ;;
+                anidb) _ns=anidb ;;
+                *) die "Unknown source: $2 (valid: anidb, anime-sama, franime)" ;;
+            esac
+            mkdir -p "$(dirname "$_conf")"
+            if [ -f "$_conf" ] && grep -q "^site=" "$_conf"; then
+                sed "s|^site=.*|site=$_ns|" "$_conf" >"${_conf}.tmp" && mv "${_conf}.tmp" "$_conf"
+            elif [ -f "$_conf" ]; then
+                printf "site=%s\n" "$_ns" >>"$_conf"
+            else
+                {
+                    echo "# Configuration ani-cli"
+                    echo "# Sources possibles: anidb, sama (anime-sama), franime"
+                    echo "site=$_ns"
+                } >"$_conf"
+            fi
+            info "Site par défaut enregistré : $_ns ($_conf)"
+            exit 0
             ;;
         --no-detach) no_detach=1 ;;
         --exit-after-play) exit_after_play=1 && no_detach=1 ;;

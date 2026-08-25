@@ -125,7 +125,14 @@ rm -rf ~/.local/state/ani-cli         # historique
 
 ## ⚙️ Site par défaut
 
-Trois moyens, par ordre de **priorité croissante** :
+Le plus simple — une commande dédiée :
+
+```sh
+ani-cli --set-site franime        # enregistre durablement
+ani-cli --set-site                # affiche le site par défaut actuel
+```
+
+Ou, par ordre de **priorité croissante** :
 
 1. **Fichier de configuration** — `~/.config/ani-cli/ani-cli.conf`
    ```sh
@@ -208,6 +215,7 @@ man ani-cli                           # aide complète
 | `--dub` | Version doublée (anidb : `fre`→`eng` par défaut ; sama/franime : VF) |
 | `-L`, `--dub-lang <langs>` | Langues de dub prioritaires, séparées par virgules (anidb). Codes ou noms : `fre,french,jpn,japanese…`. Implique `--dub` |
 | `--site <nom>` | Source : `anidb`, `anime-sama`, `franime` |
+| `--set-site <nom>` | **Enregistrer le site par défaut** dans la config (sans argument : affiche le site actuel) |
 | `--rofi` / `--dmenu` | Frontend de menu alternatif |
 | `--skip` | Skip intro via ani-skip (mpv) |
 | `--no-detach` | Lecteur au premier plan (mpv, pratique dans le terminal) |
