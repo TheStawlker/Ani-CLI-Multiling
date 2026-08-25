@@ -62,7 +62,7 @@ if cmp -s "$BIN_FILE" "$INSTALLED"; then
     exit 0
 fi
 
-OLD_VER="$("$INSTALLED" --version 2>/dev/null || echo '?')"
+OLD_VER="$(grep -m1 '^version_number=' "$INSTALLED" | tr -d '"' | cut -d '=' -f 2)"
 NEW_VER="$(sh -c "sh -n '$BIN_FILE' && sed -nE 's|^version_number=\"([^\"]+)\"\$|\\1|p' '$BIN_FILE'")"
 
 if [ "$CHECK" = 1 ]; then
