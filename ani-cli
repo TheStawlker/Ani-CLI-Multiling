@@ -337,7 +337,7 @@ fa_require_deps() {
 franime_search() {
     fa_require_deps
     _cache="${hist_dir}/franime-index.tsv"
-    if [ ! -f "$_cache" ] || [ -n "$(find "$_cache" -mtime +1 2>/dev/null)" ]; then
+    if [ ! -s "$_cache" ] || [ -n "$(find "$_cache" -mtime +1 2>/dev/null)" ]; then
         case "$json_bin" in
             python3)
                 fa_api "https://api.franime.fr/api/animes" | python3 -c '
@@ -346,16 +346,21 @@ try:
     for a in json.load(sys.stdin):
         aid = a.get("id")
         t = a.get("title") or a.get("titleO") or ""
-        print(str(aid) + "\t" + str(t).replace("\t", " ").replace("\n", " "))
+        t = str(t).replace("\t", " ").replace("\n", " ").strip()
+        if aid is None or not t:
+            continue
+        print(str(aid) + "\t" + t)
 except Exception:
     pass' >"$_cache" || : >"$_cache"
                 ;;
             *)
-                fa_api "https://api.franime.fr/api/animes" | jq -r '.[] | [(.id|tostring), ((.title // .titleO // "")|gsub("[\\n\\t]";" "))] | join("\t")' >"$_cache" 2>/dev/null || : >"$_cache"
+                fa_api "https://api.franime.fr/api/animes" | jq -r '.[] | ((.title // .titleO // "") as $t | select(($t|length) > 0) | [(.id|tostring), ($t|gsub("[\\n\\t]";" "))] | join("\t"))' >"$_cache" 2>/dev/null || : >"$_cache"
                 ;;
         esac
     fi
-    grep -iE "$(printf '%s' "$1" | sed 's/ /[. ]+/g')" "$_cache" | head -n 30 | sed 's/^/franime:/'
+    # ne jamais afficher une entrée sans titre, quelle que soit l'état du cache
+    grep -iE "$(printf '%s' "$1" | sed 's/ /[. ]+/g')" "$_cache" 2>/dev/null |
+        awk -F'\t' 'NF >= 2 && $2 != ""' | head -n 30 | sed 's/^/franime:/'
 }
 
 # fetch details of an anime into a temp file, prints the file path
